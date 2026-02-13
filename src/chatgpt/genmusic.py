@@ -21,7 +21,19 @@ import math
 import random
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, DefaultDict, Dict, List, Optional, Protocol, Sequence, Tuple, Type, TypeVar
+from typing import (
+    Any,
+    Callable,
+    DefaultDict,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    Sequence,
+    Tuple,
+    Type,
+    TypeVar,
+)
 from collections import defaultdict
 
 # -------- MIDI deps (optional runtime) --------
@@ -35,10 +47,12 @@ except Exception:
 # Event model
 # =========================
 
+
 @dataclass(frozen=True)
 class Event:
     t: float = field(default_factory=time.monotonic)
     meta: Dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass(frozen=True)
 class TickEvent(Event):
@@ -46,21 +60,25 @@ class TickEvent(Event):
     beat: float = 0.0
     steps_per_beat: int = 4
 
+
 @dataclass(frozen=True)
 class TriggerEvent(Event):
     name: str = "trigger"
     value: float = 1.0
+
 
 @dataclass(frozen=True)
 class ValueEvent(Event):
     name: str = "value"
     value: float = 0.0
 
+
 @dataclass(frozen=True)
 class ParamChangeEvent(Event):
     target: str = ""
     param: str = ""
     value: Any = None
+
 
 @dataclass(frozen=True)
 class NoteEvent(Event):
@@ -74,15 +92,18 @@ class NoteEvent(Event):
 # Randomness policies
 # =========================
 
+
 class RandomPolicy(Protocol):
     def accept(self, p: float, *, rng: random.Random) -> bool: ...
     def choice(self, seq: Sequence[Any], *, rng: random.Random) -> Any: ...
+
 
 @dataclass
 class DefaultRandomPolicy:
     def accept(self, p: float, *, rng: random.Random) -> bool:
         p = max(0.0, min(1.0, float(p)))
         return rng.random() < p
+
     def choice(self, seq: Sequence[Any], *, rng: random.Random) -> Any:
         return rng.choice(list(seq))
 
@@ -93,18 +114,25 @@ class DefaultRandomPolicy:
 
 E = TypeVar("E", bound=Event)
 
+
 class EventBus:
     def __init__(self) -> None:
-        self._subs: DefaultDict[Type[Event], List[asyncio.Queue[Event]]] = defaultdict(list)
+        self._subs: DefaultDict[Type[Event], List[asyncio.Queue[Event]]] = defaultdict(
+            list
+        )
         self._lock = asyncio.Lock()
 
-    async def subscribe(self, event_type: Type[E], max_queue: int = 2048) -> "SubscriptionImpl[E]":
+    async def subscribe(
+        self, event_type: Type[E], max_queue: int = 2048
+    ) -> "SubscriptionImpl[E]":
         q: asyncio.Queue[Event] = asyncio.Queue(maxsize=max_queue)
         async with self._lock:
             self._subs[event_type].append(q)
         return SubscriptionImpl(bus=self, event_type=event_type, queue=q)
 
-    async def unsubscribe(self, event_type: Type[Event], q: asyncio.Queue[Event]) -> None:
+    async def unsubscribe(
+        self, event_type: Type[Event], q: asyncio.Queue[Event]
+    ) -> None:
         async with self._lock:
             if event_type in self._subs and q in self._subs[event_type]:
                 self._subs[event_type].remove(q)
@@ -121,14 +149,17 @@ class EventBus:
             except asyncio.QueueFull:
                 pass
 
+
 @dataclass
 class SubscriptionImpl:
     bus: EventBus
     event_type: Type[E]
     queue: asyncio.Queue[Event]
+
     async def recv(self) -> E:
         ev = await self.queue.get()
         return ev  # type: ignore
+
     async def close(self) -> None:
         await self.bus.unsubscribe(self.event_type, self.queue)
 
@@ -136,6 +167,7 @@ class SubscriptionImpl:
 # =========================
 # Scales
 # =========================
+
 
 @dataclass(frozen=True)
 class Scale:
@@ -150,13 +182,17 @@ class Scale:
         octave_shift, idx = divmod(degree, n)
         return self.intervals[idx] + octave_shift * self.octave
 
+
 class ScaleRegistry:
     def __init__(self) -> None:
         self._scales: Dict[str, Scale] = {}
+
     def add(self, scale: Scale) -> None:
         self._scales[scale.name] = scale
+
     def get(self, name: str) -> Scale:
         return self._scales[name]
+
     def names(self) -> List[str]:
         return sorted(self._scales.keys())
 
@@ -164,6 +200,7 @@ class ScaleRegistry:
 # =========================
 # Euclidean rhythm
 # =========================
+
 
 def bjorklund(k: int, n: int) -> List[int]:
     if n <= 0:
@@ -204,11 +241,13 @@ def bjorklund(k: int, n: int) -> List[int]:
         pattern[:] = pattern[first:] + pattern[:first]
     return pattern
 
+
 @dataclass
 class EuclideanPattern:
     steps: int
     pulses: int
     rotation: int = 0
+
     def render(self) -> List[int]:
         p = bjorklund(self.pulses, self.steps)
         if not p:
@@ -221,12 +260,19 @@ class EuclideanPattern:
 # Nodes
 # =========================
 
+
 class Node(Protocol):
     async def start(self) -> None: ...
 
 
 class Clock(Node):
-    def __init__(self, bus: EventBus, bpm: float = 120.0, steps_per_beat: int = 4, loop_steps: int = 16) -> None:
+    def __init__(
+        self,
+        bus: EventBus,
+        bpm: float = 120.0,
+        steps_per_beat: int = 4,
+        loop_steps: int = 16,
+    ) -> None:
         self.bus = bus
         self.bpm = bpm
         self.steps_per_beat = steps_per_beat
@@ -243,7 +289,13 @@ class Clock(Node):
         step = 0
         spstep = self.seconds_per_step()
         while self._running:
-            await self.bus.publish(TickEvent(step=step % self.loop_steps, beat=step / self.steps_per_beat, steps_per_beat=self.steps_per_beat))
+            await self.bus.publish(
+                TickEvent(
+                    step=step % self.loop_steps,
+                    beat=step / self.steps_per_beat,
+                    steps_per_beat=self.steps_per_beat,
+                )
+            )
             await asyncio.sleep(spstep)
             step += 1
 
@@ -282,7 +334,9 @@ class EventScheduler(Node):
                 continue
             self._wakeup.clear()
             try:
-                await asyncio.wait_for(self._wakeup.wait(), timeout=max(0.0, when - now))
+                await asyncio.wait_for(
+                    self._wakeup.wait(), timeout=max(0.0, when - now)
+                )
             except asyncio.TimeoutError:
                 pass
 
@@ -292,7 +346,9 @@ class EventScheduler(Node):
 
 
 class ContinuousSignal(Node):
-    def __init__(self, bus: EventBus, name: str, fn: Callable[[float], float], hz: float = 50.0) -> None:
+    def __init__(
+        self, bus: EventBus, name: str, fn: Callable[[float], float], hz: float = 50.0
+    ) -> None:
         self.bus = bus
         self.name = name
         self.fn = fn
@@ -353,8 +409,16 @@ class Integrator(Node):
                 self._state += (x - self.leak * self._state) * dt
 
                 if self.threshold is not None and self._state >= self.threshold:
-                    if self.random_policy.accept(self.trigger_probability, rng=self.rng):
-                        await self.bus.publish(TriggerEvent(name=self.trigger_name, value=1.0, meta={"integrated": self._state}))
+                    if self.random_policy.accept(
+                        self.trigger_probability, rng=self.rng
+                    ):
+                        await self.bus.publish(
+                            TriggerEvent(
+                                name=self.trigger_name,
+                                value=1.0,
+                                meta={"integrated": self._state},
+                            )
+                        )
                     self._state = 0.0
         finally:
             await sub.close()
@@ -390,7 +454,10 @@ class EuclideanRhythmNode(Node):
         try:
             while True:
                 done, _ = await asyncio.wait(
-                    [asyncio.create_task(tick_sub.recv()), asyncio.create_task(param_sub.recv())],
+                    [
+                        asyncio.create_task(tick_sub.recv()),
+                        asyncio.create_task(param_sub.recv()),
+                    ],
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 for task in done:
@@ -399,19 +466,35 @@ class EuclideanRhythmNode(Node):
                         if not self._rendered:
                             continue
                         idx = ev.step % len(self._rendered)
-                        if self._rendered[idx] == 1 and self.random_policy.accept(self.probability, rng=self.rng):
-                            await self.bus.publish(TriggerEvent(name=self.hit_trigger_name, value=1.0, meta={"source": self.name, "step": ev.step}))
+                        if self._rendered[idx] == 1 and self.random_policy.accept(
+                            self.probability, rng=self.rng
+                        ):
+                            await self.bus.publish(
+                                TriggerEvent(
+                                    name=self.hit_trigger_name,
+                                    value=1.0,
+                                    meta={"source": self.name, "step": ev.step},
+                                )
+                            )
                     elif isinstance(ev, ParamChangeEvent):
                         if ev.target != self.name:
                             continue
                         if ev.param == "steps":
-                            self.pattern = EuclideanPattern(int(ev.value), self.pattern.pulses, self.pattern.rotation)
+                            self.pattern = EuclideanPattern(
+                                int(ev.value),
+                                self.pattern.pulses,
+                                self.pattern.rotation,
+                            )
                             self._rerender()
                         elif ev.param == "pulses":
-                            self.pattern = EuclideanPattern(self.pattern.steps, int(ev.value), self.pattern.rotation)
+                            self.pattern = EuclideanPattern(
+                                self.pattern.steps, int(ev.value), self.pattern.rotation
+                            )
                             self._rerender()
                         elif ev.param == "rotation":
-                            self.pattern = EuclideanPattern(self.pattern.steps, self.pattern.pulses, int(ev.value))
+                            self.pattern = EuclideanPattern(
+                                self.pattern.steps, self.pattern.pulses, int(ev.value)
+                            )
                             self._rerender()
                         elif ev.param == "probability":
                             self.probability = float(ev.value)
@@ -498,7 +581,10 @@ class Arpeggiator(Node):
         try:
             while True:
                 done, _ = await asyncio.wait(
-                    [asyncio.create_task(trig_sub.recv()), asyncio.create_task(param_sub.recv())],
+                    [
+                        asyncio.create_task(trig_sub.recv()),
+                        asyncio.create_task(param_sub.recv()),
+                    ],
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 for task in done:
@@ -506,7 +592,9 @@ class Arpeggiator(Node):
                     if isinstance(ev, TriggerEvent):
                         if ev.name != self.trigger_name:
                             continue
-                        if not self.random_policy.accept(self.config.probability, rng=self.rng):
+                        if not self.random_policy.accept(
+                            self.config.probability, rng=self.rng
+                        ):
                             continue
                         pitch = self._next()
                         await self.bus.publish(
@@ -526,25 +614,201 @@ class Arpeggiator(Node):
                         elif ev.param == "root_midi":
                             self.root_midi = int(ev.value)
                         elif ev.param == "pattern":
-                            self.config = ArpConfig(**{**self.config.__dict__, "pattern": str(ev.value)})
+                            self.config = ArpConfig(
+                                **{**self.config.__dict__, "pattern": str(ev.value)}
+                            )
                         elif ev.param == "degrees":
-                            self.config = ArpConfig(**{**self.config.__dict__, "degrees": tuple(int(x) for x in ev.value)})
+                            self.config = ArpConfig(
+                                **{
+                                    **self.config.__dict__,
+                                    "degrees": tuple(int(x) for x in ev.value),
+                                }
+                            )
                         elif ev.param == "octaves":
-                            self.config = ArpConfig(**{**self.config.__dict__, "octaves": int(ev.value)})
+                            self.config = ArpConfig(
+                                **{**self.config.__dict__, "octaves": int(ev.value)}
+                            )
                         elif ev.param == "gate_beats":
-                            self.config = ArpConfig(**{**self.config.__dict__, "gate_beats": float(ev.value)})
+                            self.config = ArpConfig(
+                                **{
+                                    **self.config.__dict__,
+                                    "gate_beats": float(ev.value),
+                                }
+                            )
                         elif ev.param == "velocity":
-                            self.config = ArpConfig(**{**self.config.__dict__, "velocity": float(ev.value)})
+                            self.config = ArpConfig(
+                                **{**self.config.__dict__, "velocity": float(ev.value)}
+                            )
                         elif ev.param == "probability":
-                            self.config = ArpConfig(**{**self.config.__dict__, "probability": float(ev.value)})
+                            self.config = ArpConfig(
+                                **{
+                                    **self.config.__dict__,
+                                    "probability": float(ev.value),
+                                }
+                            )
         finally:
             await trig_sub.close()
             await param_sub.close()
 
 
+@dataclass
+class DrumConfig:
+    kick_pattern: Tuple[int, ...] = (1, 0, 0, 0, 1, 0, 0, 0)
+    snare_pattern: Tuple[int, ...] = (0, 0, 0, 0, 1, 0, 0, 0)
+    hihat_pattern: Tuple[int, ...] = (1, 0, 1, 0, 1, 0, 1, 0)
+    kick_pitch: int = 36
+    snare_pitch: int = 38
+    hihat_pitch: int = 42
+    velocity: float = 0.8
+    channel: int = 9
+
+
+class DrumNode(Node):
+    def __init__(
+        self,
+        bus: EventBus,
+        *,
+        name: str = "drums",
+        trigger_name: str = "drum_trigger",
+        config: DrumConfig = DrumConfig(),
+    ) -> None:
+        self.bus = bus
+        self.name = name
+        self.trigger_name = trigger_name
+        self.config = config
+        self._step = 0
+
+    async def start(self) -> None:
+        tick_sub = await self.bus.subscribe(TickEvent)
+        try:
+            while True:
+                ev = await tick_sub.recv()
+                step = ev.step % len(self.config.hihat_pattern)
+                self._step = step
+
+                if self._trigger(step, self.config.kick_pattern):
+                    await self.bus.publish(
+                        NoteEvent(
+                            pitch=self.config.kick_pitch,
+                            velocity=self.config.velocity,
+                            gate_beats=0.1,
+                            channel=self.config.channel,
+                            meta={"source": self.name, "drum": "kick"},
+                        )
+                    )
+
+                if self._trigger(step, self.config.snare_pattern):
+                    await self.bus.publish(
+                        NoteEvent(
+                            pitch=self.config.snare_pitch,
+                            velocity=self.config.velocity,
+                            gate_beats=0.1,
+                            channel=self.config.channel,
+                            meta={"source": self.name, "drum": "snare"},
+                        )
+                    )
+
+                if self._trigger(step, self.config.hihat_pattern):
+                    await self.bus.publish(
+                        NoteEvent(
+                            pitch=self.config.hihat_pitch,
+                            velocity=self.config.velocity * 0.6,
+                            gate_beats=0.05,
+                            channel=self.config.channel,
+                            meta={"source": self.name, "drum": "hihat"},
+                        )
+                    )
+        finally:
+            await tick_sub.close()
+
+    def _trigger(self, step: int, pattern: Tuple[int, ...]) -> bool:
+        if step >= len(pattern):
+            return False
+        return pattern[step] == 1
+
+
+class BassNode(Node):
+    def __init__(
+        self,
+        bus: EventBus,
+        scales: ScaleRegistry,
+        *,
+        name: str = "bass",
+        trigger_name: str = "bass_trigger",
+        scale_name: str = "dorian",
+        root_midi: int = 36,
+        pattern: str = "octave",
+        probability: float = 1.0,
+        gate_beats: float = 0.5,
+        velocity: float = 0.7,
+        channel: int = 1,
+        rng: Optional[random.Random] = None,
+    ) -> None:
+        self.bus = bus
+        self.scales = scales
+        self.name = name
+        self.trigger_name = trigger_name
+        self.scale_name = scale_name
+        self.root_midi = root_midi
+        self.pattern = pattern
+        self.probability = probability
+        self.gate_beats = gate_beats
+        self.velocity = velocity
+        self.channel = channel
+        self.rng = rng or random.Random()
+        self._i = 0
+
+    def _next_pitch(self) -> int:
+        scale = self.scales.get(self.scale_name)
+        pat = self.pattern.lower()
+
+        if pat == "root":
+            return self.root_midi + scale.degree_to_semitones(0)
+        elif pat == "octave":
+            return (
+                self.root_midi
+                + scale.degree_to_semitones(0)
+                + (12 if self._i % 2 == 0 else 0)
+            )
+        elif pat == "fifth":
+            return self.root_midi + scale.degree_to_semitones(4)
+        elif pat == "walk":
+            degrees = [0, 0, 2, 4, 5, 7]
+            d = self.rng.choice(degrees)
+            return self.root_midi + scale.degree_to_semitones(d)
+        else:
+            return self.root_midi + scale.degree_to_semitones(0)
+
+    async def start(self) -> None:
+        trig_sub = await self.bus.subscribe(TriggerEvent)
+        try:
+            while True:
+                ev = await trig_sub.recv()
+                if ev.name != self.trigger_name:
+                    continue
+                if self.rng.random() > self.probability:
+                    continue
+
+                pitch = self._next_pitch()
+                self._i += 1
+
+                await self.bus.publish(
+                    NoteEvent(
+                        pitch=pitch,
+                        velocity=self.velocity,
+                        gate_beats=self.gate_beats,
+                        channel=self.channel,
+                        meta={"source": self.name, "scale": self.scale_name},
+                    )
+                )
+        finally:
+            await trig_sub.close()
+
+
 # =========================
 # MIDI output sink
 # =========================
+
 
 class MidiOutSink(Node):
     """
@@ -581,14 +845,18 @@ class MidiOutSink(Node):
 
     def _open_midi(self) -> None:
         if mido is None:
-            print("[MIDI] mido not installed. Install with: pip install mido python-rtmidi")
+            print(
+                "[MIDI] mido not installed. Install with: pip install mido python-rtmidi"
+            )
             return
 
         # Prepare file recording
         self._mid = mido.MidiFile(ticks_per_beat=480)
         self._track = mido.MidiTrack()
         self._mid.tracks.append(self._track)
-        self._track.append(mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(self.bpm), time=0))
+        self._track.append(
+            mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(self.bpm), time=0)
+        )
 
         # Try open output port
         try:
@@ -633,18 +901,32 @@ class MidiOutSink(Node):
                 dur_s = self._beats_to_seconds(ev.gate_beats)
 
                 if mido is not None:
-                    on = mido.Message("note_on", note=pitch, velocity=vel, channel=ch, time=0)
-                    off = mido.Message("note_off", note=pitch, velocity=0, channel=ch, time=0)
+                    on = mido.Message(
+                        "note_on", note=pitch, velocity=vel, channel=ch, time=0
+                    )
+                    off = mido.Message(
+                        "note_off", note=pitch, velocity=0, channel=ch, time=0
+                    )
 
                     # live send
                     if self._port is not None:
                         self._port.send(on)
                         # schedule note_off without blocking
-                        self.scheduler.schedule_in(dur_s, TriggerEvent(name="__midi_note_off__", value=0.0, meta={"msg": off}))
+                        self.scheduler.schedule_in(
+                            dur_s,
+                            TriggerEvent(
+                                name="__midi_note_off__", value=0.0, meta={"msg": off}
+                            ),
+                        )
                     # record
                     self._record_msg(on)
                     # record off at correct delay by inserting later (approx via scheduler)
-                    self.scheduler.schedule_in(dur_s, TriggerEvent(name="__midi_record_off__", value=0.0, meta={"msg": off}))
+                    self.scheduler.schedule_in(
+                        dur_s,
+                        TriggerEvent(
+                            name="__midi_record_off__", value=0.0, meta={"msg": off}
+                        ),
+                    )
 
         finally:
             await sub.close()
@@ -670,6 +952,7 @@ class MidiAuxRouter(Node):
     Handles scheduled TriggerEvents that carry MIDI messages to send/record,
     so MidiOutSink can schedule without blocking.
     """
+
     def __init__(self, bus: EventBus, midi_sink: MidiOutSink) -> None:
         self.bus = bus
         self.midi_sink = midi_sink
@@ -697,9 +980,183 @@ class MidiAuxRouter(Node):
             await sub.close()
 
 
+INSTRUMENT_PRESETS = {
+    "acoustic": {
+        0: (0, 0),  # Acoustic Grand
+        1: (0, 33),  # Electric Bass
+        2: (0, 48),  # Strings
+        9: (0, 0),  # Drums
+    },
+    "electronic": {
+        0: (0, 19),  # Synth Piano
+        1: (0, 38),  # Synth Bass
+        2: (0, 80),  # Sawtooth Lead
+        9: (0, 17),  # Analog Drums
+    },
+    "303": {
+        0: (0, 86),  # Lead Square (303-like)
+        1: (0, 39),  # Synth Bass (38/39)
+        2: (0, 17),  # Timpani (for sub)
+        9: (0, 17),  # Analog Drums
+    },
+    "techno": {
+        0: (0, 18),  # Rock Organ
+        1: (0, 40),  # Fretless Bass
+        2: (0, 43),  # Synth Strings
+        9: (0, 17),  # Analog Drums
+    },
+}
+
+
+class FluidSynthSink(Node):
+    """
+    Plays NoteEvent via FluidSynth software synthesizer.
+    Supports multiple channels with effects, filters, and instrument presets.
+    Requires: pip install pyfluidsynth
+
+    Real-time controls via ParamChangeEvent:
+    - target="synth", param="reverb", value=0-127
+    - target="synth", param="chorus", value=0-127
+    - target="synth", param="filter", value=0-127 (cutoff)
+    - target="synth", param="volume", value=0-127
+    """
+
+    def __init__(
+        self,
+        bus: EventBus,
+        *,
+        bpm: float,
+        soundfont_path: str = "/usr/share/sounds/sf2/FluidR3_GM.sf2",
+        driver: str = "alsa",
+        gain: float = 0.5,
+        preset: str = "acoustic",
+        instruments: Optional[Dict[int, Tuple[int, int]]] = None,
+        reverb: int = 30,
+        chorus: int = 0,
+        filter_cutoff: int = 127,
+    ) -> None:
+        self.bus = bus
+        self.bpm = bpm
+        self._fs = None
+        self._sfid = None
+
+        self.instruments = instruments or INSTRUMENT_PRESETS.get(
+            preset, INSTRUMENT_PRESETS["acoustic"]
+        )
+        self.reverb = reverb
+        self.chorus = chorus
+        self.filter_cutoff = filter_cutoff
+
+        try:
+            import fluidsynth
+
+            self._fs = fluidsynth.Synth()
+            self._fs.start(driver=driver)
+            self._fs.setting("synth.gain", gain)
+            self._sfid = self._fs.sfload(soundfont_path)
+
+            for ch, (bank, prog) in self.instruments.items():
+                if ch == 9:
+                    self._fs.program_select(ch, self._sfid, bank, 0)
+                else:
+                    self._fs.program_select(ch, self._sfid, bank, prog)
+
+            self._apply_reverb()
+            self._apply_chorus()
+            self._apply_filter_all()
+
+            print(
+                f"[FluidSynthSink] Initialized with preset '{preset}': {self.instruments}"
+            )
+        except Exception as e:
+            print(f"[FluidSynthSink] Failed to initialize: {e}")
+            self._fs = None
+
+    def _apply_reverb(self) -> None:
+        if self._fs:
+            self._fs.set_reverb(self.reverb / 127.0, 0.2, 0.5, 1.0)
+
+    def _apply_chorus(self) -> None:
+        if self._fs:
+            if self.chorus > 0:
+                self._fs.set_chorus(3, self.chorus / 127.0 * 3.0, 0.3, 1)
+            else:
+                self._fs.set_chorus(0, 0, 0, 0)
+
+    def _apply_filter_all(self) -> None:
+        if self._fs:
+            for ch in range(16):
+                self._fs.cc(ch, 74, self.filter_cutoff)
+
+    def _beats_to_seconds(self, beats: float) -> float:
+        return (60.0 / max(1e-9, self.bpm)) * float(beats)
+
+    async def start(self) -> None:
+        if self._fs is None:
+            return
+
+        note_sub = await self.bus.subscribe(NoteEvent)
+        param_sub = await self.bus.subscribe(ParamChangeEvent)
+
+        try:
+            while True:
+                done, _ = await asyncio.wait(
+                    [
+                        asyncio.create_task(note_sub.recv()),
+                        asyncio.create_task(param_sub.recv()),
+                    ],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in done:
+                    ev = task.result()
+
+                    if isinstance(ev, NoteEvent):
+                        pitch = int(ev.pitch)
+                        vel = int(max(0, min(127, round(ev.velocity * 127))))
+                        ch = int(ev.channel) if hasattr(ev, "channel") else 0
+                        dur_s = self._beats_to_seconds(ev.gate_beats)
+
+                        self._fs.noteon(ch, pitch, vel)
+                        asyncio.create_task(self._noteoff(ch, pitch, dur_s))
+
+                    elif isinstance(ev, ParamChangeEvent):
+                        if ev.target != "synth":
+                            continue
+                        if ev.param == "reverb":
+                            self.reverb = int(max(0, min(127, ev.value)))
+                            self._apply_reverb()
+                        elif ev.param == "chorus":
+                            self.chorus = int(max(0, min(127, ev.value)))
+                            self._apply_chorus()
+                        elif ev.param == "filter":
+                            self.filter_cutoff = int(max(0, min(127, ev.value)))
+                            self._apply_filter_all()
+                        elif ev.param == "volume":
+                            vol = int(max(0, min(127, ev.value)))
+                            for ch in range(16):
+                                self._fs.cc(ch, 7, vol)
+        finally:
+            await note_sub.close()
+            await param_sub.close()
+
+    async def _noteoff(self, ch: int, pitch: int, dur_s: float) -> None:
+        await asyncio.sleep(max(0.01, dur_s))
+        if self._fs:
+            self._fs.noteoff(ch, pitch)
+
+    def close(self) -> None:
+        if self._fs:
+            try:
+                self._fs.delete()
+            except Exception:
+                pass
+            self._fs = None
+
+
 # =========================
 # System
 # =========================
+
 
 class System:
     def __init__(self) -> None:
@@ -723,6 +1180,7 @@ class System:
 # =========================
 # Demo wiring
 # =========================
+
 
 def default_scales() -> ScaleRegistry:
     reg = ScaleRegistry()
@@ -761,7 +1219,14 @@ async def main() -> None:
         trigger_name="rhythm_hit",
         scale_name="dorian",
         root_midi=60,
-        config=ArpConfig(degrees=(0, 2, 4, 6), pattern="updown", octaves=2, probability=1.0, gate_beats=0.22, velocity=0.85),
+        config=ArpConfig(
+            degrees=(0, 2, 4, 6),
+            pattern="updown",
+            octaves=2,
+            probability=1.0,
+            gate_beats=0.22,
+            velocity=0.85,
+        ),
     )
 
     # Continuous modulation -> integrated -> triggers scale changes
@@ -770,8 +1235,8 @@ async def main() -> None:
         name="mod_noise",
         hz=60.0,
         fn=lambda t: 0.50 * math.sin(2.0 * math.pi * 0.41 * t)
-                  + 0.35 * math.sin(2.0 * math.pi * 0.73 * t + 1.2)
-                  + 0.25 * math.sin(2.0 * math.pi * 1.19 * t + 2.1),
+        + 0.35 * math.sin(2.0 * math.pi * 0.73 * t + 1.2)
+        + 0.25 * math.sin(2.0 * math.pi * 1.19 * t + 2.1),
     )
     integ = Integrator(
         bus,
@@ -786,8 +1251,16 @@ async def main() -> None:
     class ScaleFlipNode(Node):
         def __init__(self, bus: EventBus) -> None:
             self.bus = bus
-            self.scales = ["dorian", "phrygian", "lydian", "mixolydian", "minor", "major"]
+            self.scales = [
+                "dorian",
+                "phrygian",
+                "lydian",
+                "mixolydian",
+                "minor",
+                "major",
+            ]
             self.i = 0
+
         async def start(self) -> None:
             sub = await self.bus.subscribe(TriggerEvent)
             try:
@@ -796,11 +1269,17 @@ async def main() -> None:
                     if ev.name != "scale_flip":
                         continue
                     self.i = (self.i + 1) % len(self.scales)
-                    await self.bus.publish(ParamChangeEvent(target="arp", param="scale", value=self.scales[self.i]))
+                    await self.bus.publish(
+                        ParamChangeEvent(
+                            target="arp", param="scale", value=self.scales[self.i]
+                        )
+                    )
             finally:
                 await sub.close()
 
-    midi = MidiOutSink(bus, sched, bpm=bpm, out_path="out.mid", preferred_port_contains=None)
+    midi = MidiOutSink(
+        bus, sched, bpm=bpm, out_path="out.mid", preferred_port_contains=None
+    )
     midi_aux = MidiAuxRouter(bus, midi)
 
     sys.add(sched)
